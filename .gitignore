@@ -1,0 +1,23 @@
+# Build outputs
+build/
+bin/
+
+# Visual Studio / MSBuild
+.vs/
+*.sln
+*.vcxproj*
+*.vcxproj.user
+*.vcxproj.filters
+*.vcxproj.user
+*.pdb
+*.obj
+*.ipch
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+
+# Logs / misc
+*.log
