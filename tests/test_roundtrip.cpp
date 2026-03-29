@@ -47,7 +47,7 @@ void writeFile(const std::string& path, const std::vector<uint8_t>& data) {
 std::string generatePassword(size_t len = 16) {
     std::random_device rd;
     std::mt19937_64 gen(rd());
-    std::uniform_int_distribution<uint8_t> dist(0, 255);
+    std::uniform_int_distribution<int> dist(0, 255);
     std::ostringstream ss;
     ss << std::hex << std::setfill('0');
     for (size_t i = 0; i < len; ++i) {

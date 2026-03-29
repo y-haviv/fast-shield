@@ -9,11 +9,26 @@
 #ifndef WIN32_FILE_HANDLER_HPP
 #define WIN32_FILE_HANDLER_HPP
 
-#include <windows.h>
 #include <string>
 #include <vector>
 #include <stdexcept>
 #include <cstdint>
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+using DWORD = uint32_t;
+using HANDLE = int;
+constexpr DWORD FILE_BEGIN = 0;
+constexpr DWORD FILE_CURRENT = 1;
+constexpr DWORD FILE_END = 2;
+#endif
 
 class Win32FileHandler {
 public:
@@ -60,7 +75,13 @@ public:
 private:
     std::string m_filePath;
     HANDLE m_fileHandle;
-    LARGE_INTEGER m_fileSize;
+    uint64_t m_fileSize;
+
+#ifdef _WIN32
+    static constexpr HANDLE kInvalidHandle = INVALID_HANDLE_VALUE;
+#else
+    static constexpr HANDLE kInvalidHandle = -1;
+#endif
 
     // Helper to throw detailed Windows error messages
     void throwLastError(const std::string& action);

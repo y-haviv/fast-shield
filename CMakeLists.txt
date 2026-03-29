@@ -22,9 +22,15 @@ set(FASTSHIELD_SOURCES
 
 add_library(fastshield_lib ${FASTSHIELD_SOURCES})
 target_include_directories(fastshield_lib PUBLIC include)
-target_compile_definitions(fastshield_lib PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_compile_definitions(fastshield_lib PUBLIC FASTSHIELD_VERSION="${PROJECT_VERSION}")
-target_link_libraries(fastshield_lib PUBLIC bcrypt)
+
+if (WIN32)
+    target_compile_definitions(fastshield_lib PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(fastshield_lib PUBLIC bcrypt)
+endif()
+
+find_package(Threads REQUIRED)
+target_link_libraries(fastshield_lib PUBLIC Threads::Threads)
 
 if (MSVC)
     target_compile_options(fastshield_lib PRIVATE /W4 /permissive- /EHsc)

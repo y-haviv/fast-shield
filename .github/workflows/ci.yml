@@ -7,26 +7,21 @@ on:
     branches: [ main, master ]
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        build_type: [Release]
     steps:
       - uses: actions/checkout@v4
       - name: Configure CMake
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        shell: bash
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
       - name: Build
-        run: cmake --build build --config Release
+        shell: bash
+        run: cmake --build build --config ${{ matrix.build_type }} --parallel
       - name: Run tests
-        run: |
-          ctest --test-dir build --config Release --output-on-failure
-
-  build-ubuntu:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Configure CMake
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-      - name: Build
-        run: cmake --build build --config Release
-      - name: Run tests
-        run: |
-          ctest --test-dir build --config Release --output-on-failure
+        shell: bash
+        run: ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure

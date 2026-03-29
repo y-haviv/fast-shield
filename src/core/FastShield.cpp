@@ -13,6 +13,9 @@
 #include <array>
 #include <atomic>
 #include <exception>
+#include <filesystem>
+#include <iomanip>
+#include <iostream>
 #include <map>
 #include <mutex>
 #include <sstream>
@@ -94,13 +97,73 @@ public:
 
     ~OutputGuard() {
         if (m_active) {
-            DeleteFileA(m_path.c_str());
+            std::error_code ec;
+            std::filesystem::remove(m_path, ec);
         }
     }
 
 private:
     std::string m_path;
     bool m_active;
+};
+
+class ProgressBar {
+public:
+    ProgressBar(const char* label, uint64_t totalBytes)
+        : m_label(label), m_totalBytes(totalBytes) {
+        if (m_totalBytes == 0) {
+            m_enabled = false;
+            return;
+        }
+        render(0, 0);
+    }
+
+    void update(uint64_t processedBytes) {
+        if (!m_enabled) {
+            return;
+        }
+
+        uint64_t clamped = std::min(processedBytes, m_totalBytes);
+        uint32_t percent = static_cast<uint32_t>((clamped * 100) / m_totalBytes);
+        if (percent == m_lastPercent && clamped < m_totalBytes &&
+            clamped < (m_lastBytes + kMinBytesStep)) {
+            return;
+        }
+
+        render(percent, clamped);
+        m_lastPercent = percent;
+        m_lastBytes = clamped;
+    }
+
+    void finish() {
+        if (!m_enabled) {
+            return;
+        }
+        render(100, m_totalBytes);
+        std::cout << "\n";
+        std::cout.flush();
+    }
+
+private:
+    static constexpr uint64_t kMinBytesStep = 4ULL * 1024ULL * 1024ULL;
+    static constexpr size_t kBarWidth = 30;
+
+    void render(uint32_t percent, uint64_t processedBytes) {
+        size_t filled = static_cast<size_t>((percent * kBarWidth) / 100);
+        std::string bar(kBarWidth, '-');
+        std::fill(bar.begin(), bar.begin() + filled, '#');
+
+        std::cout << '\r' << m_label << " [" << bar << "] "
+                  << std::setw(3) << percent << "% ("
+                  << processedBytes << "/" << m_totalBytes << " bytes)";
+        std::cout.flush();
+    }
+
+    const char* m_label;
+    uint64_t m_totalBytes = 0;
+    uint64_t m_lastBytes = 0;
+    uint32_t m_lastPercent = 0;
+    bool m_enabled = true;
 };
 
 template <typename ArrayT>
@@ -243,7 +306,9 @@ void encryptFile(
     std::thread writer([&]() {
         try {
             uint64_t nextIndex = 0;
+            uint64_t writtenBytes = 0;
             std::map<uint64_t, Chunk> pending;
+            ProgressBar progress("Encrypting", fileSize);
             Chunk chunk;
             while (toWrite.pop(chunk)) {
                 pending.emplace(chunk.index, std::move(chunk));
@@ -252,6 +317,8 @@ void encryptFile(
                     Chunk& ready = it->second;
                     hmac.update(ready.data.data(), ready.data.size());
                     output.writeExact(ready.data.data(), ready.data.size());
+                    writtenBytes += ready.data.size();
+                    progress.update(writtenBytes);
                     pending.erase(it);
                     ++nextIndex;
                     it = pending.find(nextIndex);
@@ -261,6 +328,8 @@ void encryptFile(
             if (!pending.empty() && !errorState.stop.load()) {
                 throw std::runtime_error("Write queue closed with pending chunks.");
             }
+
+            progress.finish();
         } catch (...) {
             errorState.fail(std::current_exception(), toEncrypt, toWrite);
         }
@@ -412,7 +481,9 @@ void decryptFile(
     std::thread writer([&]() {
         try {
             uint64_t nextIndex = 0;
+            uint64_t writtenBytes = 0;
             std::map<uint64_t, Chunk> pending;
+            ProgressBar progress("Decrypting", cipherSize);
             Chunk chunk;
             while (toWrite.pop(chunk)) {
                 pending.emplace(chunk.index, std::move(chunk));
@@ -420,6 +491,8 @@ void decryptFile(
                 while (it != pending.end()) {
                     Chunk& ready = it->second;
                     output.writeExact(ready.data.data(), ready.data.size());
+                    writtenBytes += ready.data.size();
+                    progress.update(writtenBytes);
                     pending.erase(it);
                     ++nextIndex;
                     it = pending.find(nextIndex);
@@ -429,6 +502,8 @@ void decryptFile(
             if (!pending.empty() && !errorState.stop.load()) {
                 throw std::runtime_error("Write queue closed with pending chunks.");
             }
+
+            progress.finish();
         } catch (...) {
             errorState.fail(std::current_exception(), toDecrypt, toWrite);
         }
