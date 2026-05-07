@@ -1,30 +1,20 @@
-#ifndef FASTSHIELD_WIN32_FILE_HANDLER_HPP
-#define FASTSHIELD_WIN32_FILE_HANDLER_HPP
+#ifndef FASTSHIELD_LINUX_FILE_HANDLER_HPP
+#define FASTSHIELD_LINUX_FILE_HANDLER_HPP
 
 #include "io/FileHandler.hpp"
 
 #include <cstdint>
 #include <string>
 
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#endif
-
 namespace fastshield {
 
-class Win32FileHandler final : public FileHandler {
+class LinuxFileHandler final : public FileHandler {
 public:
-    Win32FileHandler();
-    ~Win32FileHandler() override;
+    LinuxFileHandler();
+    ~LinuxFileHandler() override;
 
-    Win32FileHandler(const Win32FileHandler&) = delete;
-    Win32FileHandler& operator=(const Win32FileHandler&) = delete;
+    LinuxFileHandler(const LinuxFileHandler&) = delete;
+    LinuxFileHandler& operator=(const LinuxFileHandler&) = delete;
 
     void openForReading(const std::string& path, const FileOpenOptions& options) override;
     void openForWriting(const std::string& path, const FileOpenOptions& options) override;
@@ -41,13 +31,9 @@ public:
     bool directIoEnabled() const override;
 
 private:
-    void throwLastError(const std::string& action) const;
+    void throwErrno(const std::string& action) const;
 
-#ifdef _WIN32
-    HANDLE m_fileHandle = INVALID_HANDLE_VALUE;
-#else
-    int m_fileHandle = -1;
-#endif
+    int m_fd = -1;
     uint64_t m_fileSize = 0;
     bool m_directIo = false;
     size_t m_alignment = 4096;
@@ -55,4 +41,4 @@ private:
 
 } // namespace fastshield
 
-#endif // FASTSHIELD_WIN32_FILE_HANDLER_HPP
+#endif // FASTSHIELD_LINUX_FILE_HANDLER_HPP

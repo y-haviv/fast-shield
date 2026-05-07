@@ -40,10 +40,12 @@ inline void writeLE32(uint8_t* out, uint32_t value) {
     out[3] = static_cast<uint8_t>((value >> 24) & 0xff);
 }
 
-void chachaBlock(const std::array<uint8_t, 32>& key,
-                 const std::array<uint8_t, 12>& nonce,
-                 uint32_t counter,
-                 uint8_t out[64]) {
+} // namespace
+
+void chacha20Block(const std::array<uint8_t, 32>& key,
+                   const std::array<uint8_t, 12>& nonce,
+                   uint32_t counter,
+                   uint8_t out[64]) {
     uint32_t state[16];
     state[0] = kConstants[0];
     state[1] = kConstants[1];
@@ -84,21 +86,18 @@ void chachaBlock(const std::array<uint8_t, 32>& key,
     }
 }
 
-} // namespace
-
-void chacha20Xor(
+void chacha20XorWithCounter(
     uint8_t* data,
     size_t len,
     const std::array<uint8_t, 32>& key,
     const std::array<uint8_t, 12>& nonce,
+    uint32_t initialCounter,
     uint64_t streamOffset) {
     if (!data || len == 0) {
         return;
     }
 
-    // RFC 8439 recommends starting the block counter at 1.
-    constexpr uint32_t kInitialCounter = 1;
-    uint64_t counter64 = (streamOffset / 64) + kInitialCounter;
+    uint64_t counter64 = (streamOffset / 64) + initialCounter;
     uint32_t blockOffset = static_cast<uint32_t>(streamOffset % 64);
 
     if (counter64 > 0xFFFFFFFFULL) {
@@ -111,7 +110,7 @@ void chacha20Xor(
     while (remaining > 0) {
         uint32_t counter = static_cast<uint32_t>(counter64);
         uint8_t block[64];
-        chachaBlock(key, nonce, counter, block);
+        chacha20Block(key, nonce, counter, block);
 
         size_t take = 64 - blockOffset;
         if (take > remaining) {
@@ -131,6 +130,16 @@ void chacha20Xor(
             throw std::runtime_error("ChaCha20 counter overflow.");
         }
     }
+}
+
+void chacha20Xor(
+    uint8_t* data,
+    size_t len,
+    const std::array<uint8_t, 32>& key,
+    const std::array<uint8_t, 12>& nonce,
+    uint64_t streamOffset) {
+    // RFC 8439 recommends starting the block counter at 1.
+    chacha20XorWithCounter(data, len, key, nonce, 1u, streamOffset);
 }
 
 } // namespace fastshield

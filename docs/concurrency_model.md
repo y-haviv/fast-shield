@@ -1,43 +1,36 @@
-FastShield Concurrency Model
-============================
+# Concurrency Model (V2)
 
-Pipeline Overview
------------------
-FastShield uses a three-stage pipeline:
-1. Reader thread pulls sequential chunks from disk.
-2. Worker thread pool encrypts/decrypts chunks in parallel.
-3. Writer thread emits chunks in original order.
+## Pipeline
+FastShield uses a three-stage bounded pipeline:
+1. Reader thread
+2. Worker pool
+3. Writer thread
 
-This design keeps disk I/O and CPU encryption work overlapped while avoiding large memory spikes.
+## Buffer Lifecycle
+- Reader acquires an aligned chunk buffer from `BufferPool`.
+- Buffer moves through queues without copying.
+- Worker encrypts/decrypts in place and attaches AEAD tag.
+- Writer persists output and releases buffer back to pool via RAII.
 
-Queues and Backpressure
------------------------
-- Two bounded blocking queues connect the stages.
-  - Reader -> Workers (toEncrypt/toDecrypt)
-  - Workers -> Writer (toWrite)
-- Each queue has a finite capacity (default: 2x number of threads).
-- When a queue is full, upstream stages block, providing natural backpressure.
+This removes per-chunk heap allocation (`std::vector` growth/teardown) from steady-state processing.
 
-Ordering Guarantees
--------------------
-- Each chunk is tagged with an incremental index.
-- The writer uses a pending map keyed by index to reassemble order.
-- Chunks are written only when all previous indexes are complete.
+## Queues and Backpressure
+Two bounded queues enforce flow control:
+- Reader -> Workers
+- Workers -> Writer
 
-Thread Safety
--------------
-- Input and output files are used by separate threads.
-- Worker threads operate on independent chunk buffers.
-- The HMAC context is updated in only one thread per mode:
-  - Encrypt: Writer thread updates HMAC with ciphertext.
-  - Decrypt: Reader thread updates HMAC with ciphertext.
+If downstream is slower, upstream blocks, preventing unbounded memory growth.
 
-Failure Handling
-----------------
-- Any thread that encounters an exception closes both queues.
-- A shared stop flag informs other threads to exit gracefully.
-- The main thread joins all workers and rethrows the first error.
+## Ordering
+Each chunk carries an index. Writer stores out-of-order arrivals in a pending map and emits strictly increasing index order.
 
-Why This Works
---------------
-ChaCha20 is a stream cipher with a position-based keystream. Each chunk is encrypted using its absolute byte offset, so chunks are independent and safe to process in parallel without requiring in-order execution.
+## Failure Semantics
+Any exception in any stage:
+- stores first error
+- sets stop flag
+- closes queues
+- shuts down buffer pool
+- joins threads
+- rethrows in caller
+
+Partial output artifacts are deleted by `OutputGuard` unless successful completion is reached.

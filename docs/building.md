@@ -1,31 +1,34 @@
-Building FastShield
-===================
+# Building FastShield V2
 
-Prerequisites
--------------
-- Windows 10 or later
+## Requirements
 - CMake 3.21+
-- Visual Studio 2022 (MSVC) or another C++20 compiler
+- C++20 compiler
+- Windows: Visual Studio 2022 or newer
+- Linux: gcc/clang toolchain, optional `liburing` for io_uring backend acceleration
 
-Configure
----------
-From the project root:
-- `cmake -S . -B build`
+## Configure
+```bash
+cmake -S . -B build
+```
 
-Build (Release)
----------------
-- `cmake --build build --config Release`
+## Build
+Release:
+```bash
+cmake --build build --config Release
+```
 
-Build (Debug)
--------------
-- `cmake --build build --config Debug`
+Debug:
+```bash
+cmake --build build --config Debug
+```
 
-Run Tests
----------
-Tests are enabled by default:
-- `ctest --test-dir build --config Release`
+## Tests
+```bash
+ctest --test-dir build --config Debug --output-on-failure
+```
 
-Disable Tests
-------------
-If you want a lean build:
-- `cmake -S . -B build -DFASTSHIELD_BUILD_TESTS=OFF`
+## Build Options
+- `FASTSHIELD_BUILD_TESTS=ON|OFF`: enable/disable tests (default ON).
+
+## Linux io_uring Notes
+If `liburing` is found at configure time, CMake defines `FASTSHIELD_HAS_IO_URING=1` and links `liburing`. Without it, Linux backend falls back to POSIX syscalls.

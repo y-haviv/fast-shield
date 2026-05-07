@@ -7,6 +7,20 @@
 
 namespace fastshield {
 
+void chacha20Block(
+    const std::array<uint8_t, 32>& key,
+    const std::array<uint8_t, 12>& nonce,
+    uint32_t counter,
+    uint8_t out[64]);
+
+void chacha20XorWithCounter(
+    uint8_t* data,
+    size_t len,
+    const std::array<uint8_t, 32>& key,
+    const std::array<uint8_t, 12>& nonce,
+    uint32_t initialCounter,
+    uint64_t streamOffset);
+
 void chacha20Xor(
     uint8_t* data,
     size_t len,

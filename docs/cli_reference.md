@@ -1,42 +1,37 @@
-FastShield CLI Reference
-========================
+# FastShield CLI Reference (V2)
 
-Synopsis
---------
-```
+## Synopsis
+```text
 fastshield encrypt -i <input> -o <output> -p <password> [options]
 fastshield decrypt -i <input> -o <output> -p <password> [options]
 ```
 
-Required Arguments
-------------------
-- `-i`, `--input <path>`: Input file path.
-- `-o`, `--output <path>`: Output file path.
-- Password input: either `-p`, `--password <text>` or `--password-stdin`.
+## Required
+- `-i`, `--input <path>`: input file path
+- `-o`, `--output <path>`: output file path
+- Password source:
+  - `-p`, `--password <text>`
+  - `--password-stdin`
 
-Optional Arguments
-------------------
-- `--password-stdin`: Read password from stdin (recommended for security).
-- `--threads <n>`: Number of worker threads. `0` uses hardware concurrency.
-- `--chunk-size <size>`: Chunk size using `K`, `M`, or `G` suffix (e.g., `4M`).
-- `--overwrite`: Allow overwriting the output file.
-- `--verbose`: Enable debug logging.
-- `-h`, `--help`: Show usage.
-- `--version`: Show version.
+## Optional
+- `--threads <n>`: worker threads (`0` means auto)
+- `--chunk-size <size>`: chunk size, supports `K`, `M`, `G`
+- `--direct-io`: enable direct I/O attempt for plaintext path
+- `--overwrite`: allow replacing output file
+- `--verbose`: debug logging
+- `-h`, `--help`: help text
+- `--version`: version output
 
-Examples
---------
-Encrypt:
-```
-fastshield encrypt -i bigfile.bin -o bigfile.fs --password-stdin
-```
-
-Decrypt:
-```
-fastshield decrypt -i bigfile.fs -o bigfile.bin --password-stdin
+## Examples
+Encrypt with stdin password:
+```bash
+fastshield encrypt -i dataset.bin -o dataset.fs --password-stdin --threads 8 --chunk-size 8M
 ```
 
-Notes
------
-- For large files, increasing chunk size may improve throughput.
-- Passwords provided as CLI arguments can appear in shell history.
+Decrypt with direct I/O attempt:
+```bash
+fastshield decrypt -i dataset.fs -o dataset.bin --password-stdin --direct-io --chunk-size 4096
+```
+
+## Direct I/O Constraints
+When `--direct-io` is enabled, alignment constraints from the underlying OS/device apply. FastShield validates these constraints and fails with a clear error when requirements are not met.

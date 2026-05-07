@@ -2,6 +2,7 @@
 #define FASTSHIELD_CRYPTO_ENGINE_HPP
 
 #include "core/ChaCha20.hpp"
+#include "core/ChaCha20Poly1305.hpp"
 #include "core/Pbkdf2.hpp"
 
 #include <array>
@@ -12,10 +13,8 @@
 namespace fastshield {
 
 struct KeyMaterial {
-    /// Encryption key for ChaCha20 (256-bit).
-    std::array<uint8_t, 32> encKey{};
-    /// MAC key for HMAC-SHA256 (256-bit).
-    std::array<uint8_t, 32> macKey{};
+    /// AEAD key for ChaCha20-Poly1305 (256-bit).
+    std::array<uint8_t, 32> aeadKey{};
 };
 
 class CryptoEngine {
@@ -26,25 +25,20 @@ public:
     static constexpr size_t kSaltSize = 16;
     /// 96-bit nonce for ChaCha20 (IETF variant).
     static constexpr size_t kNonceSize = 12;
-    /// HMAC-SHA256 output size.
-    static constexpr size_t kMacSize = 32;
-    /// Maximum bytes that can be processed with a 32-bit ChaCha20 counter.
-    static constexpr uint64_t kMaxBytes = 0xFFFFFFFFULL * 64ULL;
+    /// Authentication tag size for ChaCha20-Poly1305.
+    static constexpr size_t kTagSize = ChaCha20Poly1305::kTagSize;
 
-    /// Derive encryption and MAC keys from a password and salt.
+    /// Derive a ChaCha20-Poly1305 key from password and salt.
     static KeyMaterial deriveKey(
         const std::string& password,
         const uint8_t* salt,
         size_t saltLen,
         uint32_t iterations);
 
-    /// XOR the buffer in-place with a ChaCha20 keystream.
-    static void cryptBuffer(
-        uint8_t* data,
-        size_t len,
-        const KeyMaterial& keys,
-        const std::array<uint8_t, kNonceSize>& nonce,
-        uint64_t streamOffset);
+    /// Build a unique per-chunk nonce by combining base nonce with chunk index.
+    static std::array<uint8_t, kNonceSize> nonceForChunk(
+        const std::array<uint8_t, kNonceSize>& baseNonce,
+        uint64_t chunkIndex);
 };
 
 } // namespace fastshield

@@ -10,7 +10,11 @@
 namespace fastshield {
 
 static constexpr char kMagic[8] = {'F', 'S', 'T', 'S', 'H', 'L', 'D', '\0'};
-static constexpr uint16_t kFormatVersion = 1;
+static constexpr uint16_t kFormatVersion = 2;
+
+enum FileFlags : uint32_t {
+    kFlagDirectIoRequested = 1u << 0
+};
 
 #pragma pack(push, 1)
 struct FileHeader {
@@ -21,30 +25,35 @@ struct FileHeader {
     uint32_t chunkSize;
     uint32_t kdfIterations;
     uint64_t originalSize;
+    uint64_t chunkCount;
     uint8_t salt[CryptoEngine::kSaltSize];
     uint8_t nonce[CryptoEngine::kNonceSize];
-    uint8_t reserved[4];
+    uint8_t tagSize;
+    uint8_t reserved[3];
 };
 #pragma pack(pop)
 
-static_assert(sizeof(FileHeader) == 64, "FileHeader must be 64 bytes.");
+static_assert(sizeof(FileHeader) == 72, "FileHeader must be 72 bytes.");
 
 inline FileHeader makeHeader(
     uint64_t originalSize,
     uint32_t chunkSize,
     uint32_t kdfIterations,
+    uint32_t flags,
     const uint8_t* salt,
     const uint8_t* nonce) {
     FileHeader header{};
     std::memcpy(header.magic, kMagic, sizeof(header.magic));
     header.version = kFormatVersion;
     header.headerSize = static_cast<uint16_t>(sizeof(FileHeader));
-    header.flags = 0;
+    header.flags = flags;
     header.chunkSize = chunkSize;
     header.kdfIterations = kdfIterations;
     header.originalSize = originalSize;
+    header.chunkCount = (chunkSize == 0) ? 0 : ((originalSize + chunkSize - 1) / chunkSize);
     std::memcpy(header.salt, salt, CryptoEngine::kSaltSize);
     std::memcpy(header.nonce, nonce, CryptoEngine::kNonceSize);
+    header.tagSize = static_cast<uint8_t>(CryptoEngine::kTagSize);
     std::memset(header.reserved, 0, sizeof(header.reserved));
     return header;
 }
@@ -63,6 +72,12 @@ inline bool validateHeader(const FileHeader& header) {
         return false;
     }
     if (header.kdfIterations == 0) {
+        return false;
+    }
+    if (header.tagSize != CryptoEngine::kTagSize) {
+        return false;
+    }
+    if (header.chunkCount != ((header.originalSize + header.chunkSize - 1) / header.chunkSize)) {
         return false;
     }
     return true;

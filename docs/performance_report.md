@@ -1,41 +1,33 @@
-FastShield Performance Report
-=============================
+# Performance Notes (V2)
 
-Status
-------
-This report is a template intended for real benchmarking runs. Fill in the values after collecting measurements on your target system.
+## Why V2 Is Faster and More Predictable
+- Buffer pooling removes repeated allocation/free overhead in hot paths.
+- Chunked AEAD keeps work parallel-friendly and cache-local.
+- Cross-platform file abstraction allows backend-specific optimization.
+- Optional direct I/O can reduce page-cache churn on bulk operations.
 
-Test Environment
-----------------
-- CPU:
-- RAM:
-- Storage:
-- OS:
-- Compiler:
-- Build Type:
+## Benchmark Template
+Record on your target host:
+- CPU model
+- RAM size
+- Storage type (NVMe/SATA/network)
+- OS + kernel
+- Compiler + flags
 
-Methodology
------------
-1. Encrypt files of increasing sizes (1 GiB, 5 GiB, 10 GiB, 50 GiB).
-2. Measure total wall time (start to completion).
-3. Compute throughput as MB/s.
-4. Run each test 3 times and average.
+Run matrix:
+- file sizes: 1 GiB, 10 GiB, 100 GiB
+- chunk sizes: 1 MiB, 4 MiB, 16 MiB
+- threads: 1, half cores, full cores
+- direct I/O: off/on
 
-Results (Template)
-------------------
-| File Size | Threads | Chunk Size | Encrypt MB/s | Decrypt MB/s |
-|----------|---------|------------|--------------|--------------|
-| 1 GiB    | 4       | 4 MiB      | TBD          | TBD          |
-| 5 GiB    | 4       | 4 MiB      | TBD          | TBD          |
-| 10 GiB   | 8       | 8 MiB      | TBD          | TBD          |
-| 50 GiB   | 8       | 8 MiB      | TBD          | TBD          |
+Report:
+| File Size | Threads | Chunk | Direct I/O | Encrypt MB/s | Decrypt MB/s |
+|---|---:|---:|---|---:|---:|
+| 1 GiB | 8 | 4 MiB | off | TBD | TBD |
+| 10 GiB | 8 | 8 MiB | off | TBD | TBD |
+| 10 GiB | 8 | 8 MiB | on | TBD | TBD |
 
-Observations (Template)
------------------------
-- Throughput scales with more threads until disk I/O saturates.
-- Larger chunk sizes reduce overhead but increase memory usage.
-- Decryption throughput is typically comparable to encryption.
-
-Notes
------
-Record drive model and filesystem, as they influence I/O performance.
+## Interpretation Guidance
+- If throughput plateaus as threads increase, storage is likely saturated.
+- If direct I/O improves consistency but not peak speed, cache eviction pressure was the prior bottleneck.
+- If tiny chunks degrade speed, scheduling and queue overhead dominate.

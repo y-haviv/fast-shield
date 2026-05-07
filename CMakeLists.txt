@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(FastShield VERSION 0.1.0 LANGUAGES CXX)
+project(FastShield VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -10,12 +10,17 @@ option(FASTSHIELD_BUILD_TESTS "Build FastShield tests" ON)
 
 set(FASTSHIELD_SOURCES
     src/core/ChaCha20.cpp
+    src/core/ChaCha20Poly1305.cpp
     src/core/CryptoEngine.cpp
     src/core/FastShield.cpp
     src/core/HmacSha256.cpp
     src/core/Pbkdf2.cpp
+    src/core/Poly1305.cpp
     src/core/Sha256.cpp
+    src/io/FileHandler.cpp
+    src/io/LinuxFileHandler.cpp
     src/io/Win32FileHandler.cpp
+    src/utils/BufferPool.cpp
     src/utils/Random.cpp
     src/utils/SecureZero.cpp
 )
@@ -27,6 +32,12 @@ target_compile_definitions(fastshield_lib PUBLIC FASTSHIELD_VERSION="${PROJECT_V
 if (WIN32)
     target_compile_definitions(fastshield_lib PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
     target_link_libraries(fastshield_lib PUBLIC bcrypt)
+else()
+    find_library(URING_LIBRARY uring)
+    if (URING_LIBRARY)
+        target_compile_definitions(fastshield_lib PUBLIC FASTSHIELD_HAS_IO_URING=1)
+        target_link_libraries(fastshield_lib PUBLIC ${URING_LIBRARY})
+    endif()
 endif()
 
 find_package(Threads REQUIRED)

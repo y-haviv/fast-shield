@@ -10,6 +10,7 @@ struct Options {
     uint32_t chunkSize = 0;
     unsigned int threads = 0;
     bool overwrite = false;
+    bool directIo = false;
     bool verbose = false;
 };
 

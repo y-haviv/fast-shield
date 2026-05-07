@@ -1,30 +1,56 @@
 #include "io/Win32FileHandler.hpp"
 
+#include <stdexcept>
+
+namespace fastshield {
+
 #ifdef _WIN32
 
-Win32FileHandler::Win32FileHandler(const std::string& filePath)
-    : m_filePath(filePath), m_fileHandle(kInvalidHandle), m_fileSize(0) {
+namespace {
+
+DWORD toMoveMethod(SeekWhence whence) {
+    switch (whence) {
+    case SeekWhence::Begin:
+        return FILE_BEGIN;
+    case SeekWhence::Current:
+        return FILE_CURRENT;
+    case SeekWhence::End:
+        return FILE_END;
+    default:
+        return FILE_BEGIN;
+    }
+}
+
+} // namespace
+
+Win32FileHandler::Win32FileHandler() {
+    SYSTEM_INFO info{};
+    GetSystemInfo(&info);
+    m_alignment = static_cast<size_t>(info.dwPageSize == 0 ? 4096 : info.dwPageSize);
 }
 
 Win32FileHandler::~Win32FileHandler() {
     close();
 }
 
-void Win32FileHandler::openForReading() {
+void Win32FileHandler::openForReading(const std::string& path, const FileOpenOptions& options) {
     close();
-    // OPEN_EXISTING: Opens the file only if it exists.
-    // FILE_FLAG_SEQUENTIAL_SCAN: Hints to Windows that we will read from start to end.
+
+    DWORD flags = FILE_FLAG_SEQUENTIAL_SCAN;
+    if (options.directIo) {
+        flags |= FILE_FLAG_NO_BUFFERING;
+    }
+
     m_fileHandle = CreateFileA(
-        m_filePath.c_str(),
+        path.c_str(),
         GENERIC_READ,
         FILE_SHARE_READ,
-        NULL,
+        nullptr,
         OPEN_EXISTING,
-        FILE_FLAG_SEQUENTIAL_SCAN, 
-        NULL
-    );
+        flags,
+        nullptr);
 
-    if (m_fileHandle == kInvalidHandle) {
+    if (m_fileHandle == INVALID_HANDLE_VALUE) {
         throwLastError("opening file for reading");
     }
 
@@ -32,275 +58,79 @@ void Win32FileHandler::openForReading() {
     if (!GetFileSizeEx(m_fileHandle, &size)) {
         throwLastError("getting file size");
     }
+
     m_fileSize = static_cast<uint64_t>(size.QuadPart);
+    m_directIo = options.directIo;
 }
 
-void Win32FileHandler::openForWriting(const std::string& outPath, bool overwrite) {
+void Win32FileHandler::openForWriting(const std::string& path, const FileOpenOptions& options) {
     close();
-    m_filePath = outPath;
 
-    // CREATE_ALWAYS overwrites existing files, CREATE_NEW fails if it exists.
-    DWORD creation = overwrite ? CREATE_ALWAYS : CREATE_NEW;
+    DWORD createMode = options.overwrite ? CREATE_ALWAYS : CREATE_NEW;
+    DWORD flags = FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN;
+    if (options.directIo) {
+        flags |= FILE_FLAG_NO_BUFFERING;
+    }
 
     m_fileHandle = CreateFileA(
-        m_filePath.c_str(),
+        path.c_str(),
         GENERIC_WRITE,
         0,
-        NULL,
-        creation,
-        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN,
-        NULL
-    );
+        nullptr,
+        createMode,
+        flags,
+        nullptr);
 
-    if (m_fileHandle == kInvalidHandle) {
+    if (m_fileHandle == INVALID_HANDLE_VALUE) {
         throwLastError("opening file for writing");
     }
 
     m_fileSize = 0;
+    m_directIo = options.directIo;
 }
 
 void Win32FileHandler::close() {
-    if (m_fileHandle != kInvalidHandle) {
+    if (m_fileHandle != INVALID_HANDLE_VALUE) {
         CloseHandle(m_fileHandle);
-        m_fileHandle = kInvalidHandle;
+        m_fileHandle = INVALID_HANDLE_VALUE;
     }
 }
 
-void* Win32FileHandler::allocateAlignedBuffer(size_t size) {
-    /**
-     * VirtualAlloc is used instead of malloc/new.
-     * This allows us to request memory that is aligned to page boundaries,
-     * which is crucial for direct-to-disk I/O performance.
-     */
-    void* ptr = VirtualAlloc(NULL, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    if (!ptr) {
-        throwLastError("allocating aligned memory");
-    }
-    return ptr;
-}
-
-void Win32FileHandler::freeAlignedBuffer(void* ptr) {
-    if (ptr) {
-        VirtualFree(ptr, 0, MEM_RELEASE);
-    }
-}
-
-size_t Win32FileHandler::getFileSize() const {
+uint64_t Win32FileHandler::getFileSize() const {
     return m_fileSize;
 }
 
 size_t Win32FileHandler::read(void* buffer, size_t bytes) {
-    if (m_fileHandle == kInvalidHandle) {
-        throw std::runtime_error("File handle is not open for reading.");
+    if (m_fileHandle == INVALID_HANDLE_VALUE) {
+        throw std::runtime_error("File is not open for reading.");
     }
 
-    // ReadFile may return fewer bytes at EOF.
-    DWORD bytesRead = 0;
-    if (!ReadFile(m_fileHandle, buffer, static_cast<DWORD>(bytes), &bytesRead, NULL)) {
-        throwLastError("reading from file");
-    }
-    return static_cast<size_t>(bytesRead);
-}
-
-void Win32FileHandler::readExact(void* buffer, size_t bytes) {
-    size_t total = 0;
-    uint8_t* out = static_cast<uint8_t*>(buffer);
-    while (total < bytes) {
-        size_t readNow = read(out + total, bytes - total);
-        if (readNow == 0) {
-            throw std::runtime_error("Unexpected end of file while reading.");
-        }
-        total += readNow;
-    }
-}
-
-void Win32FileHandler::write(const void* buffer, size_t bytes) {
-    if (m_fileHandle == kInvalidHandle) {
-        throw std::runtime_error("File handle is not open for writing.");
-    }
-
-    // WriteFile should either write fully or fail; short writes are treated as errors.
-    DWORD bytesWritten = 0;
-    if (!WriteFile(m_fileHandle, buffer, static_cast<DWORD>(bytes), &bytesWritten, NULL)) {
-        throwLastError("writing to file");
-    }
-    if (bytesWritten != bytes) {
-        throw std::runtime_error("Short write detected.");
-    }
-}
-
-void Win32FileHandler::writeExact(const void* buffer, size_t bytes) {
-    const uint8_t* in = static_cast<const uint8_t*>(buffer);
-    size_t total = 0;
-    while (total < bytes) {
-        size_t toWrite = bytes - total;
-        DWORD bytesWritten = 0;
-        if (!WriteFile(m_fileHandle, in + total, static_cast<DWORD>(toWrite), &bytesWritten, NULL)) {
-            throwLastError("writing to file");
-        }
-        if (bytesWritten == 0) {
-            throw std::runtime_error("Write failed, zero bytes written.");
-        }
-        total += static_cast<size_t>(bytesWritten);
-    }
-}
-
-void Win32FileHandler::seek(uint64_t offset, DWORD moveMethod) {
-    LARGE_INTEGER li;
-    li.QuadPart = static_cast<LONGLONG>(offset);
-    if (!SetFilePointerEx(m_fileHandle, li, NULL, moveMethod)) {
-        throwLastError("seeking in file");
-    }
-}
-
-void Win32FileHandler::setFileSize(uint64_t size) {
-    if (m_fileHandle == kInvalidHandle) {
-        throw std::runtime_error("File handle is not open.");
-    }
-    LARGE_INTEGER li;
-    li.QuadPart = static_cast<LONGLONG>(size);
-    if (!SetFilePointerEx(m_fileHandle, li, NULL, FILE_BEGIN)) {
-        throwLastError("setting file pointer for size");
-    }
-    if (!SetEndOfFile(m_fileHandle)) {
-        throwLastError("setting end of file");
-    }
-    m_fileSize = size;
-}
-
-HANDLE Win32FileHandler::handle() const {
-    return m_fileHandle;
-}
-
-void Win32FileHandler::throwLastError(const std::string& action) {
-    DWORD errorCode = GetLastError();
-    LPSTR messageBuffer = nullptr;
-    DWORD size = FormatMessageA(
-        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-        NULL,
-        errorCode,
-        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-        reinterpret_cast<LPSTR>(&messageBuffer),
-        0,
-        NULL);
-
-    std::string message = (size && messageBuffer)
-        ? std::string(messageBuffer, size)
-        : "Unknown Win32 error.";
-
-    if (messageBuffer) {
-        LocalFree(messageBuffer);
-    }
-
-    throw std::runtime_error(
-        "Error during " + action + ": " + message + " (Win32 Error " + std::to_string(errorCode) + ")");
-}
-
-#else
-
-#include <cerrno>
-#include <cstring>
-#include <cstdlib>
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
-
-Win32FileHandler::Win32FileHandler(const std::string& filePath)
-    : m_filePath(filePath), m_fileHandle(kInvalidHandle), m_fileSize(0) {
-}
-
-Win32FileHandler::~Win32FileHandler() {
-    close();
-}
-
-void Win32FileHandler::openForReading() {
-    close();
-    m_fileHandle = ::open(m_filePath.c_str(), O_RDONLY);
-    if (m_fileHandle == kInvalidHandle) {
-        throwLastError("opening file for reading");
-    }
-
-    struct stat st {};
-    if (::fstat(m_fileHandle, &st) != 0) {
-        throwLastError("getting file size");
-    }
-    m_fileSize = static_cast<uint64_t>(st.st_size);
-}
-
-void Win32FileHandler::openForWriting(const std::string& outPath, bool overwrite) {
-    close();
-    m_filePath = outPath;
-
-    int flags = O_WRONLY | O_CREAT;
-    if (overwrite) {
-        flags |= O_TRUNC;
-    } else {
-        flags |= O_EXCL;
-    }
-
-    m_fileHandle = ::open(m_filePath.c_str(), flags, 0666);
-    if (m_fileHandle == kInvalidHandle) {
-        throwLastError("opening file for writing");
-    }
-
-    m_fileSize = 0;
-}
-
-void Win32FileHandler::close() {
-    if (m_fileHandle != kInvalidHandle) {
-        ::close(m_fileHandle);
-        m_fileHandle = kInvalidHandle;
-    }
-}
-
-void* Win32FileHandler::allocateAlignedBuffer(size_t size) {
-    void* ptr = nullptr;
-    if (::posix_memalign(&ptr, 4096, size) != 0) {
-        throwLastError("allocating aligned memory");
-    }
-    return ptr;
-}
-
-void Win32FileHandler::freeAlignedBuffer(void* ptr) {
-    std::free(ptr);
-}
-
-size_t Win32FileHandler::getFileSize() const {
-    return m_fileSize;
-}
-
-size_t Win32FileHandler::read(void* buffer, size_t bytes) {
-    if (m_fileHandle == kInvalidHandle) {
-        throw std::runtime_error("File handle is not open for reading.");
-    }
-
-    ssize_t readNow = ::read(m_fileHandle, buffer, bytes);
-    if (readNow < 0) {
+    DWORD readNow = 0;
+    if (!ReadFile(m_fileHandle, buffer, static_cast<DWORD>(bytes), &readNow, nullptr)) {
         throwLastError("reading from file");
     }
     return static_cast<size_t>(readNow);
 }
 
 void Win32FileHandler::readExact(void* buffer, size_t bytes) {
-    size_t total = 0;
     uint8_t* out = static_cast<uint8_t*>(buffer);
+    size_t total = 0;
     while (total < bytes) {
-        size_t readNow = read(out + total, bytes - total);
-        if (readNow == 0) {
-            throw std::runtime_error("Unexpected end of file while reading.");
+        size_t got = read(out + total, bytes - total);
+        if (got == 0) {
+            throw std::runtime_error("Unexpected EOF while reading file.");
         }
-        total += readNow;
+        total += got;
     }
 }
 
 void Win32FileHandler::write(const void* buffer, size_t bytes) {
-    if (m_fileHandle == kInvalidHandle) {
-        throw std::runtime_error("File handle is not open for writing.");
+    if (m_fileHandle == INVALID_HANDLE_VALUE) {
+        throw std::runtime_error("File is not open for writing.");
     }
 
-    ssize_t written = ::write(m_fileHandle, buffer, bytes);
-    if (written < 0) {
+    DWORD written = 0;
+    if (!WriteFile(m_fileHandle, buffer, static_cast<DWORD>(bytes), &written, nullptr)) {
         throwLastError("writing to file");
     }
     if (static_cast<size_t>(written) != bytes) {
@@ -312,60 +142,112 @@ void Win32FileHandler::writeExact(const void* buffer, size_t bytes) {
     const uint8_t* in = static_cast<const uint8_t*>(buffer);
     size_t total = 0;
     while (total < bytes) {
-        ssize_t written = ::write(m_fileHandle, in + total, bytes - total);
-        if (written < 0) {
+        size_t toWrite = bytes - total;
+        DWORD written = 0;
+        if (!WriteFile(m_fileHandle, in + total, static_cast<DWORD>(toWrite), &written, nullptr)) {
             throwLastError("writing to file");
         }
         if (written == 0) {
-            throw std::runtime_error("Write failed, zero bytes written.");
+            throw std::runtime_error("Write failed with zero bytes written.");
         }
         total += static_cast<size_t>(written);
     }
 }
 
-void Win32FileHandler::seek(uint64_t offset, DWORD moveMethod) {
-    if (m_fileHandle == kInvalidHandle) {
-        throw std::runtime_error("File handle is not open.");
+void Win32FileHandler::seek(int64_t offset, SeekWhence whence) {
+    if (m_fileHandle == INVALID_HANDLE_VALUE) {
+        throw std::runtime_error("File is not open.");
     }
 
-    int whence = SEEK_SET;
-    if (moveMethod == FILE_CURRENT) {
-        whence = SEEK_CUR;
-    } else if (moveMethod == FILE_END) {
-        whence = SEEK_END;
-    }
-
-    if (::lseek(m_fileHandle, static_cast<off_t>(offset), whence) == static_cast<off_t>(-1)) {
+    LARGE_INTEGER move{};
+    move.QuadPart = offset;
+    if (!SetFilePointerEx(m_fileHandle, move, nullptr, toMoveMethod(whence))) {
         throwLastError("seeking in file");
     }
 }
 
 void Win32FileHandler::setFileSize(uint64_t size) {
-    if (m_fileHandle == kInvalidHandle) {
-        throw std::runtime_error("File handle is not open.");
+    if (m_fileHandle == INVALID_HANDLE_VALUE) {
+        throw std::runtime_error("File is not open.");
     }
 
-    if (::ftruncate(m_fileHandle, static_cast<off_t>(size)) != 0) {
-        throwLastError("setting end of file");
+    LARGE_INTEGER target{};
+    target.QuadPart = static_cast<LONGLONG>(size);
+    if (!SetFilePointerEx(m_fileHandle, target, nullptr, FILE_BEGIN)) {
+        throwLastError("setting file pointer for resize");
     }
-
-    if (::lseek(m_fileHandle, 0, SEEK_SET) == static_cast<off_t>(-1)) {
-        throwLastError("setting file pointer for size");
+    if (!SetEndOfFile(m_fileHandle)) {
+        throwLastError("resizing output file");
     }
-
     m_fileSize = size;
 }
 
-HANDLE Win32FileHandler::handle() const {
-    return m_fileHandle;
+void Win32FileHandler::flush() {
+    if (m_fileHandle != INVALID_HANDLE_VALUE && !FlushFileBuffers(m_fileHandle)) {
+        throwLastError("flushing file");
+    }
 }
 
-void Win32FileHandler::throwLastError(const std::string& action) {
-    int errorCode = errno;
-    const char* message = std::strerror(errorCode);
-    throw std::runtime_error(
-        "Error during " + action + ": " + (message ? message : "Unknown error.") +
-        " (errno " + std::to_string(errorCode) + ")");
+size_t Win32FileHandler::requiredAlignment() const {
+    return m_alignment;
 }
+
+bool Win32FileHandler::directIoEnabled() const {
+    return m_directIo;
+}
+
+void Win32FileHandler::throwLastError(const std::string& action) const {
+    DWORD errorCode = GetLastError();
+    LPSTR messageBuffer = nullptr;
+
+    DWORD size = FormatMessageA(
+        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+        nullptr,
+        errorCode,
+        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+        reinterpret_cast<LPSTR>(&messageBuffer),
+        0,
+        nullptr);
+
+    std::string message = (size > 0 && messageBuffer != nullptr)
+        ? std::string(messageBuffer, size)
+        : std::string("Unknown Win32 error");
+
+    if (messageBuffer) {
+        LocalFree(messageBuffer);
+    }
+
+    throw std::runtime_error(
+        "Error during " + action + ": " + message +
+        " (Win32 error " + std::to_string(errorCode) + ").");
+}
+
+#else
+
+Win32FileHandler::Win32FileHandler() = default;
+Win32FileHandler::~Win32FileHandler() = default;
+
+void Win32FileHandler::openForReading(const std::string&, const FileOpenOptions&) {
+    throw std::runtime_error("Win32FileHandler is only available on Windows.");
+}
+
+void Win32FileHandler::openForWriting(const std::string&, const FileOpenOptions&) {
+    throw std::runtime_error("Win32FileHandler is only available on Windows.");
+}
+
+void Win32FileHandler::close() {}
+uint64_t Win32FileHandler::getFileSize() const { return 0; }
+size_t Win32FileHandler::read(void*, size_t) { throw std::runtime_error("Unsupported platform."); }
+void Win32FileHandler::readExact(void*, size_t) { throw std::runtime_error("Unsupported platform."); }
+void Win32FileHandler::write(const void*, size_t) { throw std::runtime_error("Unsupported platform."); }
+void Win32FileHandler::writeExact(const void*, size_t) { throw std::runtime_error("Unsupported platform."); }
+void Win32FileHandler::seek(int64_t, SeekWhence) { throw std::runtime_error("Unsupported platform."); }
+void Win32FileHandler::setFileSize(uint64_t) { throw std::runtime_error("Unsupported platform."); }
+void Win32FileHandler::flush() {}
+size_t Win32FileHandler::requiredAlignment() const { return 4096; }
+bool Win32FileHandler::directIoEnabled() const { return false; }
+void Win32FileHandler::throwLastError(const std::string&) const {}
 
 #endif
+
+} // namespace fastshield

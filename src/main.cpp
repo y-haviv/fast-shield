@@ -25,7 +25,7 @@ struct PasswordGuard {
 
 void printUsage() {
     std::cout
-        << "FastShield - High-speed file encryption for Windows\n"
+        << "FastShield - High-speed streaming file encryption\n"
         << "\n"
         << "Usage:\n"
         << "  fastshield encrypt -i <input> -o <output> -p <password> [options]\n"
@@ -38,6 +38,7 @@ void printUsage() {
         << "  --password-stdin          Read password from stdin\n"
         << "  --threads <n>             Worker threads (default: auto)\n"
         << "  --chunk-size <size>       Chunk size (e.g. 4M, 16M)\n"
+        << "  --direct-io               Attempt direct I/O for plaintext file path\n"
         << "  --overwrite               Allow overwriting the output file\n"
         << "  --verbose                 Enable debug logging\n"
         << "  -h, --help                Show this help text\n"
@@ -109,6 +110,8 @@ int main(int argc, char* argv[]) {
                     throw std::runtime_error("Chunk size exceeds 4 GiB.");
                 }
                 options.chunkSize = static_cast<uint32_t>(size);
+            } else if (arg == "--direct-io") {
+                options.directIo = true;
             } else if (arg == "--overwrite") {
                 options.overwrite = true;
             } else if (arg == "--verbose") {

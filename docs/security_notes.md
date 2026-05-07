@@ -1,29 +1,33 @@
-FastShield Security Notes
-=========================
+# Security Notes (V2)
 
-Design Intent
--------------
-FastShield is designed for fast, streaming file encryption on Windows. It uses standard primitives and separates encryption and integrity keys derived from a single password.
+## Cryptography
+- KDF: PBKDF2-HMAC-SHA256 with random per-file 16-byte salt.
+- Encryption + integrity: ChaCha20-Poly1305 AEAD.
+- Tag size: 16 bytes per chunk.
 
-Primitives
-----------
-- Key derivation: PBKDF2-HMAC-SHA256 with a per-file random salt.
-- Encryption: ChaCha20 (IETF 96-bit nonce).
-- Integrity: HMAC-SHA256 over header + ciphertext.
+## Chunked AEAD Design
+Each chunk is an independent AEAD message:
+- nonce: derived from file nonce + chunk index
+- AAD: chunk index + chunk plaintext size
+- ciphertext and tag are stored together in stream order
 
-Integrity and Verification
---------------------------
-- The header is authenticated, so tampering with metadata is detected.
-- HMAC comparison is constant-time to reduce timing leakage.
-- If verification fails, the output file is deleted.
-- Derived keys and nonces are wiped from memory on exit (best effort).
+Benefits:
+- parallel processing without global AEAD state contention
+- immediate detection of tampering or wrong password during decryption
+- no single-stream 256 GiB counter ceiling from offset-based stream usage
 
-Operational Guidance
---------------------
-- Use `--password-stdin` to avoid leaving secrets in shell history.
-- Keep passwords long and unique.
-- Consider rotating passwords for high-value data.
+## Memory Hygiene
+- Derived keys are wiped after use.
+- Used pooled bytes are wiped on release.
+- Password string is wiped by CLI guard after command completion.
 
-Threat Model
-------------
-FastShield is intended for local file encryption and assumes the attacker does not have control of the running process. It is not audited and should not be used as the sole control for high-risk or regulated environments.
+## Failure Handling
+On authentication error or pipeline fault:
+- all pipeline stages are signaled to stop
+- queues are closed and joined
+- partial output file is deleted
+
+## Operational Guidance
+- Prefer `--password-stdin` over inline passwords.
+- Use strong passphrases.
+- Keep backups; encryption cannot recover from forgotten passwords.

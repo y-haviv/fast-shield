@@ -12,7 +12,7 @@ KeyMaterial CryptoEngine::deriveKey(
     size_t saltLen,
     uint32_t iterations) {
     KeyMaterial keys;
-    std::array<uint8_t, 64> out{};
+    std::array<uint8_t, 32> out{};
     pbkdf2HmacSha256(
         reinterpret_cast<const uint8_t*>(password.data()),
         password.size(),
@@ -22,19 +22,19 @@ KeyMaterial CryptoEngine::deriveKey(
         out.data(),
         out.size());
 
-    std::copy(out.begin(), out.begin() + 32, keys.encKey.begin());
-    std::copy(out.begin() + 32, out.end(), keys.macKey.begin());
+    std::copy(out.begin(), out.end(), keys.aeadKey.begin());
     secureZero(out.data(), out.size());
     return keys;
 }
 
-void CryptoEngine::cryptBuffer(
-    uint8_t* data,
-    size_t len,
-    const KeyMaterial& keys,
-    const std::array<uint8_t, kNonceSize>& nonce,
-    uint64_t streamOffset) {
-    chacha20Xor(data, len, keys.encKey, nonce, streamOffset);
+std::array<uint8_t, CryptoEngine::kNonceSize> CryptoEngine::nonceForChunk(
+    const std::array<uint8_t, kNonceSize>& baseNonce,
+    uint64_t chunkIndex) {
+    std::array<uint8_t, kNonceSize> nonce = baseNonce;
+    for (size_t i = 0; i < 8; ++i) {
+        nonce[4 + i] ^= static_cast<uint8_t>((chunkIndex >> (i * 8)) & 0xffu);
+    }
+    return nonce;
 }
 
 } // namespace fastshield
